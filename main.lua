@@ -3,6 +3,19 @@ local typewriter = require("typewriter")
 
 local newTypewriter = typewriter:new()
 
+local script = "hello there john.{|pause:1|} How are you today?{|pause:2,speed:50|} Oh yeah? That's good."
+
+local textObj = display.newText({
+	text = "",
+	fontSize = 18,
+	align = "center"
+})
+textObj.x = display.contentCenterX
+textObj.y = display.contentCenterY
+
+newTypewriter:setMessage(script)
+newTypewriter:setTextObject(textObj)
+
 local resetButton = widget.newButton({
 	label = "Reset Script",
 	fontSize = 24,
@@ -23,7 +36,7 @@ local function onKeyEvent(event)
 
 	if (phase == "up") then
 		if (keyName:lower() == "enter") then
-			
+			newTypewriter:play()
 		end
 
 		if (script.pauseForInput) then
