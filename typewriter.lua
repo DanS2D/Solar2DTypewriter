@@ -40,13 +40,6 @@ function string:countSpacesUpTo(delimiter, startPos)
 	return numSpaces
 end
 
-function M:new(providerName)
-	local object = {}
-	setmetatable(object, self)
-
-	return object
-end
-
 local function parseActions(options)
 	local targetMessage = options.message
 	local stripActions = options.stripActions or false
@@ -80,6 +73,13 @@ local function parseActions(options)
 		actionPosition == nil
 
 	return parsedActions
+end
+
+function M:new(providerName)
+	local object = {}
+	setmetatable(object, self)
+
+	return object
 end
 
 function M:setMessage(message)
@@ -183,11 +183,6 @@ function M:play(effect)
 				if (currentAction.pauseAmount ~= nil) then
 					extraDelay = currentAction.pauseAmount
 					pauseAmount = currentAction.pauseAmount
-
-					if (j < #actions and actions[j].speedAmount ~= nil) then
-						extraDelay = currentAction.pauseAmount * 3
-					end
-
 					maintainSpeed = false
 					ticks = 0
 				end
