@@ -1,11 +1,19 @@
 
 local M = {
 	message = "",
-	currentPos = 0,
+	strippedMessage = "",
 	actions = {},
 	textObject = nil,
+	animationTime = 600,
 }
 M.__index = M
+
+local actionStartTag = "{|"
+local actionEndTag = "|}"
+local actionMatchTag = "%b{}"
+local pauseActionTag = "pause"
+local speedActionTag = "speed"
+local defaultSpeed = 25
 
 function string:split(sep)
 	local sep, fields = sep or ":", {}
@@ -13,7 +21,24 @@ function string:split(sep)
 	self:gsub(pattern, function(c) fields[#fields+1] = c end)
 
 	return fields
- end
+end
+
+function string:countSpacesUpTo(delimiter, startPos)
+	local stopPos = self:find(delimiter, startPos)
+	local numSpaces = 0
+
+	if (stopPos ~= nil) then
+		for i = startPos, stopPos - 1 do
+			local char = self:sub(i, i)
+
+			if (char == " ") then
+				numSpaces = numSpaces + 1
+			end
+		end
+	end
+
+	return numSpaces
+end
 
 function M:new(providerName)
 	local object = {}
@@ -22,126 +47,171 @@ function M:new(providerName)
 	return object
 end
 
-function M:setMessage(message)
-	local specials = {}
-	local specialPos = nil
+local function parseActions(options)
+	local targetMessage = options.message
+	local stripActions = options.stripActions or false
+	local parseSpaces = options.parseSpaces or false
+	local parsedActions = {}
+	local actionPosition = nil
 	local startPos = 1
 
 	repeat
-		specialPos = message:find("%b{|", startPos)
-		if (specialPos ~= nil) then
-			specials[#specials + 1] = specialPos
-			startPos = specialPos + 1
+		actionPosition = targetMessage:find(actionStartTag, startPos)
+		
+		if (actionPosition ~= nil) then
+			if (parseSpaces) then			
+				parsedActions[#parsedActions + 1] = targetMessage:countSpacesUpTo(actionStartTag, startPos)
+			else
+				parsedActions[#parsedActions + 1] = stripActions and actionPosition - 1 or actionPosition
+			end
+
+			if (stripActions) then
+				local endPos = targetMessage:find(actionEndTag, actionPosition)
+
+				if (endPos ~= nil) then
+					local actionsString = targetMessage:sub(actionPosition, endPos + 1)
+					targetMessage = targetMessage:gsub(actionsString, "", 1)
+				end
+			end
+
+			startPos = actionPosition + 1
 		end
 	until
-		specialPos == nil
+		actionPosition == nil
+
+	return parsedActions
+end
+
+function M:setMessage(message)
+	local spaces = parseActions({message = message, parseSpaces = true})
+	local realSpecials = parseActions({message = message, stripActions = true})
+	local specials = parseActions({message = message})
 
 	for i = 1, #specials do
-		local endPos = message:find("|}", specials[i])
+		local endPos = message:find(actionEndTag, specials[i])
 		local actionStartPos = specials[i] + 2
 		local actionsString = message:sub(actionStartPos, endPos - 1)
 		local actions = actionsString:split(",")
+		local totalSpaces = spaces[i]
 
 		self.actions[i] = {}
+
+		if (i > 1) then
+			totalSpaces = 0
+
+			for k = 1, i do
+				totalSpaces = totalSpaces + spaces[k]
+			end
+		end
 
 		if (#actions > 1) then
 			for j = 1, #actions do
 				self.actions[i][j] = {
 					type = actions[j]:split(":")[1],
-					value = actions[j]:split(":")[2],
-					startPos = specials[i],
-					endPos = endPos,
-					length = endPos - startPos,
+					value = tonumber(actions[j]:split(":")[2]),
+					startPos = realSpecials[i] - totalSpaces + 1
 				}
-				--print(self.actions[i][j].type)
 			end
 		else
 			self.actions[i][1] = {
 				type = actions[1]:split(":")[1],
-				value = actions[1]:split(":")[2],
-				startPos = specials[i],
-				endPos = endPos,
-				length = endPos - startPos,
+				value = tonumber(actions[1]:split(":")[2]),
+				startPos = realSpecials[i] - totalSpaces + 1
 			}
-
-			--print(self.actions[i][1].type)
 		end
 	end
 
 	self.message = message
+	self.strippedMessage = message:gsub(actionMatchTag, "")
 end
 
 function M:setTextObject(textObject)
 	self.textObject = textObject
 end
 
-function M:play()
-	local defaultSpeed = 100
-	local speed = 100
+function M:setAnimationTime(animTime)
+	self.animationTime = animTime
+end
 
-	local function typeWriter(event)
-		self.currentPos = self.currentPos + 1
-		local action = nil
+function M:play(effect)
+	local delay = (defaultSpeed * 2)
+	local pausePositions = {}
+	local pauseAmount = {}
+	local speed = {}
+	local actions = {}
+	local maintainSpeed = false
+	local speed = 0
+	local pauseAmount = 0
+	local ticks = 0
 
-		for i = 1, #self.actions do
-			for j = 1, #self.actions[i] do
-				if (self.currentPos == self.actions[i][j].startPos) then
-					action = self.actions[i]
-					break
+	for i = 1, #self.actions do
+		local currentAction = self.actions[i]
+		actions[i] = {
+			position = 0,
+			pauseAmount = nil,
+			speedAmount = nil,
+		}
+		
+		if (#currentAction == 1) then				
+			if (currentAction[1].type == pauseActionTag) then
+				actions[i].position = currentAction[1].startPos
+				actions[i].pauseAmount = (currentAction[1].value * 1000)
+			elseif (currentAction[1].type == speedActionTag) then
+				actions[i].position = currentAction[1].startPos
+				actions[i].speedAmount = (currentAction[1].value)
+			end
+		else			
+			for j = 1, #currentAction do
+				if (currentAction[j].type == pauseActionTag) then
+					actions[i].position = currentAction[j].startPos
+					actions[i].pauseAmount = (currentAction[j].value * 1000)
+				elseif (currentAction[j].type == speedActionTag) then
+					actions[i].position = currentAction[j].startPos
+					actions[i].speedAmount = (currentAction[j].value)
 				end
 			end
 		end
-
-		if (action ~= nil) then
-			if (#action == 1) then
-				print("action is a single action")
-				self.currentPos = action[1].endPos + 2
-				
-				if (action[1].type == "pause") then
-					local waitTime = action[1].value * 1000
-					timer.cancel(event.source)
-
-					timer.performWithDelay(waitTime, function()
-						timer.performWithDelay(speed, typeWriter, 0)
-					end)
-				elseif (action[1].type == "speed") then
-					print("SPEED ACTION")
-					speed = action[1].value
-					timer.cancel(event.source)
-
-					timer.performWithDelay(1, function()
-						timer.performWithDelay(speed, typeWriter, 0)
-					end)
-				end
-			else
-				print("action is a multi action")
-				local restartDelay = 1
-				speed = defaultSpeed
-				self.currentPos = action[#action].endPos + 2
-				
-				for i = 1, #action do
-					if (action[i].type == "pause") then
-						restartDelay = action[i].value * 1000
-					elseif (action[i].type == "speed") then
-						speed = action[i].value
-					end
-				end
-
-				timer.cancel(event.source)
-				timer.performWithDelay(restartDelay, function()
-					timer.performWithDelay(speed, typeWriter, 0)
-				end)
-			end
-		end
-
-		if (self.currentPos > self.message:len()) then
-			timer.cancel(event.source)
-		end
-
-		self.textObject.text = self.textObject.text .. self.message:sub(self.currentPos, self.currentPos)
 	end
 
-	timer.performWithDelay(speed, typeWriter, 0)
+	for i = 1, self.textObject.numChildren do
+		local extraDelay = defaultSpeed
+
+		for j = 1, #actions do
+			local currentAction = actions[j]
+
+			if (i == currentAction.position) then
+				if (currentAction.pauseAmount ~= nil) then
+					extraDelay = currentAction.pauseAmount
+					pauseAmount = currentAction.pauseAmount
+
+					if (j < #actions and actions[j].speedAmount ~= nil) then
+						extraDelay = currentAction.pauseAmount * 3
+					end
+
+					maintainSpeed = false
+					ticks = 0
+				end
+				
+				if (currentAction.speedAmount ~= nil) then
+					maintainSpeed = true
+					speed = currentAction.speedAmount
+				end
+			end
+
+			if (maintainSpeed) then
+				extraDelay = pauseAmount
+
+				if (ticks >= 5) then
+					extraDelay = (defaultSpeed * speed)
+				end
+				
+				ticks = ticks + 1
+			end
+		end
+
+		delay = (delay + extraDelay)
+		transition.from(self.textObject[i], {delay = delay, time = self.animationTime, xScale = 1, yScale = 1, alpha = 0, transition = easing.outBounce})
+	end	
 end
 
 return M
